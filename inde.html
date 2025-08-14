@@ -1,105 +1,92 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Product Management</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRUD App with Image Upload</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100">
-    <div class="container mx-auto p-4">
-        <h1 class="text-2xl font-bold mb-4">Product Management</h1>
-        <div class="mb-4">
-            <h2 class="text-xl font-semibold">Add/Edit Product</h2>
-            <form id="productForm" enctype="multipart/form-data" class="space-y-4">
-                <input type="hidden" id="productId">
-                <div>
-                    <label for="name" class="block">Name:</label>
-                    <input type="text" id="name" class="w-full border p-2" required>
-                </div>
-                <div>
-                    <label for="description" class="block">Description:</label>
-                    <textarea id="description" class="w-full border p-2"></textarea>
-                </div>
-                <div>
-                    <label for="price" class="block">Price:</label>
-                    <input type="number" id="price" step="0.01" class="w-full border p-2" required>
-                </div>
-                <div>
-                    <label for="image" class="block">Image:</label>
-                    <input type="file" id="image" accept="image/*" class="w-full">
-                </div>
-                <button type="submit" class="bg-blue-500 text-white px-4 py-2">Save Product</button>
-            </form>
-        </div>
-        <div>
-            <h2 class="text-xl font-semibold">Products</h2>
-            <div id="productList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-        </div>
-    </div>
-    <script>
-        async function loadProducts() {
-            const response = await fetch('/products');
-            const products = await response.json();
-            const productList = document.getElementById('productList');
-            productList.innerHTML = '';
-            products.forEach(product => {
-                const div = document.createElement('div');
-                div.className = 'border p-4';
-                div.innerHTML = `
-                    <h3 class="text-lg font-semibold">${product.name}</h3>
-                    <p>${product.description || ''}</p>
-                    <p>$${product.price}</p>
-                    ${product.image_url ? `<img src="${product.image_url}" alt="${product.name}" class="w-full h-48 object-cover">` : ''}
-                    <button onclick="editProduct(${product.id})" class="bg-yellow-500 text-white px-2 py-1 mt-2">Edit</button>
-                    <button onclick="deleteProduct(${product.id})" class="bg-red-500 text-white px-2 py-1 mt-2">Delete</button>
-                `;
-                productList.appendChild(div);
-            });
-        }
+<body class="bg-gray-100 p-4">
+  <div class="max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold mb-4">CRUD App with Image Upload</h1>
+    
+    <!-- Create/Update Form -->
+    <form id="itemForm" class="mb-8 bg-white p-6 rounded shadow">
+      <input type="hidden" id="itemId">
+      <div class="mb-4">
+        <label class="block text-sm font-medium">Name</label>
+        <input type="text" id="name" class="mt-1 p-2 w-full border rounded">
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium">Description</label>
+        <textarea id="description" class="mt-1 p-2 w-full border rounded"></textarea>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium">Image</label>
+        <input type="file" id="image" accept="image/*" class="mt-1">
+      </div>
+      <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Save</button>
+    </form>
 
-        async function editProduct(id) {
-            const response = await fetch(`/products`);
-            const products = await response.json();
-            const product = products.find(p => p.id === id);
-            if (product) {
-                document.getElementById('productId').value = product.id;
-                document.getElementById('name').value = product.name;
-                document.getElementById('description').value = product.description || '';
-                document.getElementById('price').value = product.price;
-            }
-        }
+    <!-- Items List -->
+    <div id="itemsList" class="grid grid-cols-1 gap-4"></div>
+  </div>
 
-        async function deleteProduct(id) {
-            if (confirm('Are you sure you want to delete this product?')) {
-                await fetch(`/products/${id}`, { method: 'DELETE' });
-                loadProducts();
-            }
-        }
+  <script>
+    async function fetchItems() {
+      const response = await fetch('/items');
+      const items = await response.json();
+      const itemsList = document.getElementById('itemsList');
+      itemsList.innerHTML = '';
+      items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'bg-white p-4 rounded shadow';
+        div.innerHTML = `
+          <h2 class="text-xl font-bold">${item.name}</h2>
+          <p>${item.description || ''}</p>
+          ${item.image_url ? `<img src="${item.image_url}" class="w-32 h-32 object-cover mt-2">` : ''}
+          <div class="mt-2">
+            <button onclick="editItem(${item.id})" class="bg-yellow-500 text-white px-2 py-1 rounded mr-2">Edit</button>
+            <button onclick="deleteItem(${item.id})" class="bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+          </div>
+        `;
+        itemsList.appendChild(div);
+      });
+    }
 
-        document.getElementById('productForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const id = document.getElementById('productId').value;
-            const formData = new FormData();
-            formData.append('name', document.getElementById('name').value);
-            formData.append('description', document.getElementById('description').value);
-            formData.append('price', document.getElementById('price').value);
-            const image = document.getElementById('image').files[0];
-            if (image) formData.append('image', image);
+    async function editItem(id) {
+      const response = await fetch(`/items`);
+      const items = await response.json();
+      const item = items.find(i => i.id === id);
+      document.getElementById('itemId').value = item.id;
+      document.getElementById('name').value = item.name;
+      document.getElementById('description').value = item.description || '';
+      document.getElementById('image').value = '';
+    }
 
-            const method = id ? 'PUT' : 'POST';
-            const url = id ? `/products/${id}` : '/products';
+    async function deleteItem(id) {
+      await fetch(`/items/${id}`, { method: 'DELETE' });
+      fetchItems();
+    }
 
-            await fetch(url, {
-                method,
-                body: formData
-            });
-            document.getElementById('productForm').reset();
-            document.getElementById('productId').value = '';
-            loadProducts();
-        });
+    document.getElementById('itemForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('itemId').value;
+      const formData = new FormData();
+      formData.append('name', document.getElementById('name').value);
+      formData.append('description', document.getElementById('description').value);
+      const image = document.getElementById('image').files[0];
+      if (image) formData.append('image', image);
 
-        loadProducts();
-    </script>
+      const method = id ? 'PUT' : 'POST';
+      const url = id ? `/items/${id}` : '/items';
+      await fetch(url, { method, body: formData });
+      document.getElementById('itemForm').reset();
+      document.getElementById('itemId').value = '';
+      fetchItems();
+    });
+
+    fetchItems();
+  </script>
 </body>
 </html>
