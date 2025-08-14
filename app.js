@@ -1,139 +1,127 @@
 const express = require('express');
-const mysql = require('mysql2/promise');
-const aws = require('aws-sdk');
+const { Pool } = require('pg');
 const multer = require('multer');
+const AWS = require('aws-sdk');
 const path = require('path');
 const app = express();
 const port = 3000;
 
 // Configure AWS S3
-aws.config.update({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: 'us-east-1'
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION
 });
-const s3 = new aws.S3();
 
-// Configure MySQL connection
-const dbConfig = {
-    host: process.env.RDS_HOSTNAME,
-    user: process.env.RDS_USERNAME,
-    password: process.env.RDS_PASSWORD,
-    database: process.env.RDS_DATABASE
-};
+// Configure PostgreSQL
+const pool = new Pool({
+  user: process.env.RDS_USER,
+  host: process.env.RDS_HOST,
+  database: process.env.RDS_DATABASE,
+  password: process.env.RDS_PASSWORD,
+  port: 5432
+});
 
 // Configure Multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
 
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
 
-// Create database connection
-async function getConnection() {
-    return await mysql.createConnection(dbConfig);
-}
-
 // Create table if not exists
-async function initializeDatabase() {
-    const connection = await getConnection();
-    await connection.execute(`
-        CREATE TABLE IF NOT EXISTS products (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            description TEXT,
-            price DECIMAL(10,2),
-            image_url VARCHAR(255)
-        )
-    `);
-    await connection.end();
-}
-
-// Initialize database on startup
-initializeDatabase();
+pool.query(`
+  CREATE TABLE IF NOT EXISTS items (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    image_url VARCHAR(255)
+  )
+`).catch(err => console.error('Table creation error:', err));
 
 // Routes
-app.get('/products', async (req, res) => {
-    try {
-        const connection = await getConnection();
-        const [rows] = await connection.execute('SELECT * FROM products');
-        await connection.end();
-        res.json(rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.get('/items', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM items');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/products', upload.single('image'), async (req, res) => {
-    try {
-        const { name, description, price } = req.body;
-        let imageUrl = null;
+app.post('/items', upload.single('image'), async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    let imageUrl = null;
 
-        if (req.file) {
-            const params = {
-                Bucket: process.env.S3_BUCKET,
-                Key: `products/${Date.now()}_${req.file.originalname}`,
-                Body: req.file.buffer,
-                ContentType: req.file.mimetype
-            };
-            const s3Response = await s3.upload(params).promise();
-            imageUrl = s3Response.Location;
-        }
-
-        const connection = await getConnection();
-        const [result] = await connection.execute(
-            'INSERT INTO products (name, description, price, image_url) VALUES (?, ?, ?, ?)',
-            [name, description, price, imageUrl]
-        );
-        await connection.end();
-        res.json({ id: result.insertId, name, description, price, imageUrl });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    if (req.file) {
+      const params = {
+        Bucket: process.env.S3_BUCKET,
+        Key: `images/${Date.now()}_${req.file.originalname}`,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+        ACL: 'public-read'
+      };
+      const uploadResult = await s3.upload(params).promise();
+      imageUrl = uploadResult.Location;
     }
+
+    const result = await pool.query(
+      'INSERT INTO items (name, description, image_url) VALUES ($1, $2, $3) RETURNING *',
+      [name, description, imageUrl]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.put('/products/:id', upload.single('image'), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { name, description, price } = req.body;
-        let imageUrl = req.body.currentImage;
+app.put('/items/:id', upload.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+    let imageUrl = null;
 
-        if (req.file) {
-            const params = {
-                Bucket: process.env.S3_BUCKET,
-                Key: `products/${Date.now()}_${req.file.originalname}`,
-                Body: req.file.buffer,
-                ContentType: req.file.mimetype
-            };
-            const s3Response = await s3.upload(params).promise();
-            imageUrl = s3Response.Location;
-        }
-
-        const connection = await getConnection();
-        await connection.execute(
-            'UPDATE products SET name = ?, description = ?, price = ?, image_url = ? WHERE id = ?',
-            [name, description, price, imageUrl, id]
-        );
-        await connection.end();
-        res.json({ id, name, description, price, imageUrl });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    if (req.file) {
+      const params = {
+        Bucket: process.env.S3_BUCKET,
+        Key: `images/${Date.now()}_${req.file.originalname}`,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+        ACL: 'public-read'
+      };
+      const uploadResult = await s3.upload(params).promise();
+      imageUrl = uploadResult.Location;
     }
+
+    const result = await pool.query(
+      'UPDATE items SET name = $1, description = $2, image_url = COALESCE($3, image_url) WHERE id = $4 RETURNING *',
+      [name, description, imageUrl, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.delete('/products/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const connection = await getConnection();
-        await connection.execute('DELETE FROM products WHERE id = ?', [id]);
-        await connection.end();
-        res.json({ message: 'Product deleted' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.delete('/items/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM items WHERE id = $1', [id]);
+    res.json({ message: 'Item deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Serve HTML
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+  console.log(`Server running on port ${port}`);
 });
